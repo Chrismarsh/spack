@@ -8,9 +8,9 @@ import sys
 
 from spack.build_environment import dso_suffix, stat_suffix
 from spack.package import *
+import spack as spack
 
-
-class Esmf(MakefilePackage):
+class Esmf(MakefilePackage, PythonExtension):
     """The Earth System Modeling Framework (ESMF) is high-performance, flexible
     software infrastructure for building and coupling weather, climate, and
     related Earth science applications. The ESMF defines an architecture for
@@ -96,6 +96,7 @@ class Esmf(MakefilePackage):
         default="none",
         description="Named variant for snapshots versions (e.g., 'b09')",
     )
+    variant("python", default=False, description="Build python bindings")
 
     # Optional dependencies
     depends_on("mpi", when="+mpi")
@@ -111,6 +112,10 @@ class Esmf(MakefilePackage):
     depends_on("parallelio@2.5.10: +mpi", when="@8.5:+external-parallelio+mpi")
     depends_on("parallelio@2.5.10: ~mpi", when="@8.5:+external-parallelio~mpi")
     depends_on("cmake@3.5.2:", type="build", when="~external-parallelio")
+    
+    extends("python", when="+python")
+    depends_on("py-setuptools", type="build", when="+python")
+    depends_on("py-mpi4py", when="+python +mpi")
 
     # Testing dependencies
     depends_on("perl", type="test")
@@ -143,6 +148,18 @@ class Esmf(MakefilePackage):
     # https://github.com/spack/spack/issues/35957
     patch("esmf_cpp_info.patch")
 
+class PythonPipBuilder(spack.build_systems.python.PythonPipBuilder):
+    
+    def setup_build_environment(self, env):
+        env.set("ESMFMKFILE", os.path.join(self.prefix.lib, "esmf.mk"))
+
+    @property
+    def build_directory(self):
+        return os.path.join(self.stage.source_path, 'src/addon/esmpy')
+
+
+
+class MakefileBuilder(spack.build_systems.makefile.MakefileBuilder):
     # This is strictly required on Cray systems that use
     # the Cray compiler wrappers, where we need to swap
     # out the spack compiler wrappers in esmf.mk with the
@@ -214,38 +231,38 @@ class Esmf(MakefilePackage):
         # ESMF_COMPILER must be set to select which Fortran and
         # C++ compilers are being used to build the ESMF library.
 
-        if self.compiler.name == "gcc":
+        if self.pkg.compiler.name == "gcc":
             env.set("ESMF_COMPILER", "gfortran")
-            with self.compiler.compiler_environment():
+            with self.pkg.compiler.compiler_environment():
                 gfortran_major_version = int(
                     spack.compiler.get_compiler_version_output(
-                        self.compiler.fc, "-dumpversion"
+                        self.pkg.compiler.fc, "-dumpversion"
                     ).split(".")[0]
                 )
-        elif self.compiler.name == "intel" or self.compiler.name == "oneapi":
+        elif self.pkg.compiler.name == "intel" or self.pkg.compiler.name == "oneapi":
             env.set("ESMF_COMPILER", "intel")
-        elif self.compiler.name in ["clang", "apple-clang"]:
+        elif self.pkg.compiler.name in ["clang", "apple-clang"]:
             env.set("ESMF_COMPILER", "gfortranclang")
-            with self.compiler.compiler_environment():
+            with self.pkg.compiler.compiler_environment():
                 gfortran_major_version = int(
                     spack.compiler.get_compiler_version_output(
-                        self.compiler.fc, "-dumpversion"
+                        self.pkg.compiler.fc, "-dumpversion"
                     ).split(".")[0]
                 )
-        elif self.compiler.name == "nag":
+        elif self.pkg.compiler.name == "nag":
             env.set("ESMF_COMPILER", "nag")
-        elif self.compiler.name == "pgi":
+        elif self.pkg.compiler.name == "pgi":
             env.set("ESMF_COMPILER", "pgi")
-        elif self.compiler.name == "nvhpc":
+        elif self.pkg.compiler.name == "nvhpc":
             env.set("ESMF_COMPILER", "nvhpc")
-        elif self.compiler.name == "cce":
+        elif self.pkg.compiler.name == "cce":
             env.set("ESMF_COMPILER", "cce")
-        elif self.compiler.name == "aocc":
+        elif self.pkg.compiler.name == "aocc":
             env.set("ESMF_COMPILER", "aocc")
         else:
             msg = "The compiler you are building with, "
             msg += '"{0}", is not supported by ESMF.'
-            raise InstallError(msg.format(self.compiler.name))
+            raise InstallError(msg.format(self.pkg.compiler.name))
 
         if "+mpi" in spec:
             env.set("ESMF_CXX", spec["mpi"].mpicxx)
@@ -265,7 +282,7 @@ class Esmf(MakefilePackage):
             env.set("ESMF_BOPT", "O")
 
         if (
-            self.compiler.name in ["gcc", "clang", "apple-clang"]
+            self.pkg.compiler.name in ["gcc", "clang", "apple-clang"]
             and gfortran_major_version >= 10
             and (self.spec.satisfies("@:8.2.99") or self.spec.satisfies("@8.3.0b09"))
         ):
@@ -277,7 +294,7 @@ class Esmf(MakefilePackage):
 
         # ESMF_OS must be set for Cray systems
         # But spack no longer gives arch == cray
-        if self.compiler.name == "cce" or "^cray-mpich" in self.spec:
+        if self.pkg.compiler.name == "cce" or "^cray-mpich" in self.spec:
             env.set("ESMF_OS", "Unicos")
 
         # Allow override of ESMF_OS:
@@ -423,7 +440,6 @@ class Esmf(MakefilePackage):
                 library_path = os.path.join(self.prefix.lib, "libesmf.%s" % prefix)
                 if os.path.exists(library_path):
                     os.symlink(library_path, os.path.join(self.prefix.lib, "libESMF.%s" % prefix))
-
     def check(self):
         make("check", parallel=False)
 
@@ -432,3 +448,12 @@ class Esmf(MakefilePackage):
 
     def setup_run_environment(self, env):
         env.set("ESMFMKFILE", os.path.join(self.prefix.lib, "esmf.mk"))
+
+    def install(self, pkg, spec, prefix):
+        make("install")
+
+        python_builder = PythonPipBuilder(pkg)
+        # python_builder.build_directory = os.path.join(self.stage.source_path, 'src/addon/esmpy')
+        python_builder.install(pkg, spec, prefix)
+
+
