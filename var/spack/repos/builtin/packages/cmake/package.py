@@ -333,12 +333,12 @@ class Cmake(Package):
         )
 
         # Make CMake find its own dependencies.
-        rpaths = spack.build_environment.get_rpaths(self)
+        # rpaths = spack.build_environment.get_rpaths(self)
         prefixes = spack.build_environment.get_cmake_prefix_path(self)
         args.extend(
             [
                 "-DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON",
-                "-DCMAKE_INSTALL_RPATH={0}".format(";".join(str(v) for v in rpaths)),
+                # "-DCMAKE_INSTALL_RPATH={0}".format(";".join(str(v) for v in rpaths)),
                 "-DCMAKE_PREFIX_PATH={0}".format(";".join(str(v) for v in prefixes)),
             ]
         )
