@@ -100,6 +100,7 @@ class R(AutotoolsPackage):
 
     with when("+X"):
         depends_on("cairo+X+gobject+pdf")
+        depends_on("cairo+X+gobject+pdf+quartz", when="platform=darwin")
         depends_on("pango+X")
         depends_on("harfbuzz+graphite2")
         depends_on("jpeg")
